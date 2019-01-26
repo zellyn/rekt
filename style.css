@@ -1,0 +1,16 @@
+.img-overlay-wrap {
+  position: relative;
+  display: inline-block; /* <= shrinks container to image size */
+}
+
+.img-overlay-wrap img { /* <= optional, for responsiveness */
+   display: block;
+   width: 850px;  /* 2550 x 3301 */
+   height: 1100px;
+}
+
+.img-overlay-wrap svg {
+  position: absolute;
+  top: 0;
+  left: 0;
+}
