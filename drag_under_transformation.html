@@ -1,0 +1,160 @@
+<html>
+<head>
+<title>Dragging Transformed SVG Elements</title>
+<style type="text/css" media="screen">
+  html, body {
+    background:#eee; margin:0;
+    user-select:none; -moz-user-select:none; -webkit-user-select:none;
+  }
+  p { margin:0.5em; text-align:center }
+  svg {
+      position:absolute; top:5%; left:5%; width:90%; height:90%;
+      background:#fff; border:1px solid #ccc
+  }
+  svg rect { stroke:#333 }
+  svg .drag { cursor:move }
+  svg .sizer { opacity:0.3; fill:#ff0; stroke:#630;}
+  svg .rotator { opacity:0.3; fill:#0f0; stroke:#630;}
+  #footer {
+      position:absolute; bottom:0.5em; margin-bottom:0;
+      width:40em; margin-left:-20em; left:50%; color:#666;
+      font-style:italic; font-size:85%
+  }
+  #dragcatch { position:absolute; left:0; right:0; top:0; bottom:0; z-index:-1 }
+</style>
+</head><body>
+<p>
+  Showing how to handle dragging of points inside a transformation hierarchy.
+	Written to support <a href="http://stackoverflow.com/questions/4850821/svg-coordinates-with-transform-matrix">this Stack Overflow answer</a>.
+</p>
+<svg viewBox="0 0 200 100" xmlns="http://www.w3.org/2000/svg" version="1.1" baseProfile="full">
+  <g transform="scale(1.2,0.8)">
+    <rect transform="translate(50,20) rotate(30)"
+	  class="drag resize" x="50" y="30" width="50" height="30" fill="#69c" />
+    <rect class="drag resize" x="5" y="5" width="90" height="50" fill="#c66" />
+  </g>
+</svg>
+<p id="footer">
+  Copyright © 2011 <a href="mailto:!@phrogz.net">Gavin Kistner</a>.
+  Comments/criticisms welcome.
+</p>
+<script type="text/javascript">
+  // http://jointjs.com/blog/get-transform-to-element-polyfill.html
+  SVGElement.prototype.getTransformToElement = SVGElement.prototype.getTransformToElement || function(toElement) {
+    return toElement.getScreenCTM().inverse().multiply(this.getScreenCTM());
+  };
+
+  var svg   = document.getElementsByTagName('svg')[0];
+  var svgNS = svg.getAttribute('xmlns');
+  var pt    = svg.createSVGPoint();
+
+  function createOn(root,name,prop){
+    var el = document.createElementNS(svgNS,name);
+    for (var a in prop) if (prop.hasOwnProperty(a)) el.setAttribute(a,prop[a]);
+    return root.appendChild(el);
+  }
+
+  function rectCorner(rect){
+    pt.x = rect.x.animVal.value + rect.width.animVal.value;
+    pt.y = rect.y.animVal.value + rect.height.animVal.value;
+    return pt.matrixTransform(rect.getTransformToElement(svg));
+  }
+
+  function rectRotCorner(rect){
+    pt.x = rect.x.animVal.value;
+    pt.y = rect.y.animVal.value + rect.height.animVal.value;
+    return pt.matrixTransform(rect.getTransformToElement(svg));
+  }
+
+  function pointIn(el,x,y){
+    pt.x = x; pt.y = y;
+    return pt.matrixTransform(el.getTransformToElement(svg).inverse());
+  }
+
+  function cursorPoint(evt){
+    pt.x = evt.clientX; pt.y = evt.clientY;
+    return pt.matrixTransform(svg.getScreenCTM().inverse());
+  }
+
+  // Make all rects resizable before drag, so the drag handles become drag
+  for (var a=svg.querySelectorAll('rect.resize'),i=0,len=a.length;i<len;++i){
+    (function(rect){
+      var dot = createOn(svg,'circle',{'class':'drag sizer',cx:0,cy:0,r:5});
+      var rotDot = createOn(svg,'circle',{'class':'drag rotator',cx:0,cy:0,r:5});
+      var moveDotToRect = function(){
+	var corner = rectCorner(rect);
+	dot.setAttribute('cx',corner.x);
+	dot.setAttribute('cy',corner.y);
+      }
+      var moveRotDotToRect = function(){
+	var corner = rectRotCorner(rect);
+	rotDot.setAttribute('cx',corner.x);
+	rotDot.setAttribute('cy',corner.y);
+      }
+      moveDotToRect();
+      moveRotDotToRect();
+      rect.addEventListener('dragged',moveDotToRect,false);
+      rect.addEventListener('dragged',moveRotDotToRect,false);
+      dot.addEventListener('dragged',function(){
+	var rectXY = pointIn(rect,dot.cx.animVal.value,dot.cy.animVal.value);
+	var w = Math.max( rectXY.x-rect.x.animVal.value, 1 );
+	var h = Math.max( rectXY.y-rect.y.animVal.value, 1 );
+	rect.setAttribute('width', w);
+	rect.setAttribute('height',h);
+	moveRotDotToRect();
+      },false);
+      rotDot.addEventListener('dragged',function(){
+	var rectXY = pointIn(rect,rotDot.cx.animVal.value,rotDot.cy.animVal.value);
+	// var w = Math.max( rectXY.x-rect.x.animVal.value, 1 );
+	var h = Math.max( rectXY.y-rect.y.animVal.value, 1 );
+	// rect.setAttribute('width', w);
+	// rect.setAttribute('height',h);
+	var transforms = [...rect.transform.baseVal].filter(t => t.type == SVGTransform.SVG_TRANSFORM_ROTATE);
+	var transform;
+	if (transforms.length === 0) {
+	  transform = svg.createSVGTransform();
+	  transform.setRotate(0, 0, 0);
+	  rect.transform.baseVal.insertItemBefore(transform, 0);
+	} else {
+	  transform = transforms[0];
+	}
+
+	//
+	transform.setRotate(20, 0, 0);
+	moveDotToRect();
+      },false);
+    })(a[i]);
+  }
+
+  for (var a=svg.querySelectorAll('.drag'),i=0,len=a.length;i<len;++i){
+    (function(el){
+      var onmove; // make inner closure available for unregistration
+      el.addEventListener('mousedown',function(e){
+	el.parentNode.appendChild(el); // move to top
+	var x = el.tagName=='circle' ? 'cx' : 'x';
+	var y = el.tagName=='circle' ? 'cy' : 'y';
+	var mouseStart   = cursorPoint(e);
+	var elementStart = { x:el[x].animVal.value, y:el[y].animVal.value };
+	onmove = function(e){
+	  var current = cursorPoint(e);
+	  pt.x = current.x - mouseStart.x;
+	  pt.y = current.y - mouseStart.y;
+	  var m = el.getTransformToElement(svg).inverse();
+	  m.e = m.f = 0;
+	  pt = pt.matrixTransform(m);
+	  el.setAttribute(x,elementStart.x+pt.x);
+	  el.setAttribute(y,elementStart.y+pt.y);
+	  var dragEvent = document.createEvent("Event");
+	  dragEvent.initEvent("dragged", true, true);
+	  el.dispatchEvent(dragEvent);
+	};
+	document.body.addEventListener('mousemove',onmove,false);
+      },false);
+      document.body.addEventListener('mouseup',function(){
+	document.body.removeEventListener('mousemove',onmove,false);
+      },false);
+    })(a[i]);
+  }
+</script>
+<div id="dragcatch"></div>
+</body></html>
