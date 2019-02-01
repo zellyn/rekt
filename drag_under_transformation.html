@@ -27,12 +27,10 @@
   Showing how to handle dragging of points inside a transformation hierarchy.
 	Written to support <a href="http://stackoverflow.com/questions/4850821/svg-coordinates-with-transform-matrix">this Stack Overflow answer</a>.
 </p>
-<svg viewBox="0 0 200 100" xmlns="http://www.w3.org/2000/svg" version="1.1" baseProfile="full">
-  <g transform="scale(1.2,0.8)">
-    <rect transform="translate(50,20) rotate(30)"
-	  class="drag resize" x="50" y="30" width="50" height="30" fill="#69c" />
-    <rect class="drag resize" x="5" y="5" width="90" height="50" fill="#c66" />
-  </g>
+<svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg" version="1.1" baseProfile="full">
+  <rect transform="translate(50,20) rotate(30)"
+	class="drag resize" x="50" y="30" width="50" height="30" fill="#69c" />
+  <rect class="drag resize" x="5" y="5" width="90" height="50" fill="#c66" />
 </svg>
 <p id="footer">
   Copyright © 2011 <a href="mailto:!@phrogz.net">Gavin Kistner</a>.
@@ -119,8 +117,33 @@
 	  transform = transforms[0];
 	}
 
-	//
-	transform.setRotate(20, 0, 0);
+	var y = rectXY.y - rect.y.animVal.value;
+	var x = rectXY.x - rect.x.animVal.value;
+	var radians = Math.atan2(-y, x) + Math.PI * 1 / 2;
+	var degrees = radians * 180 / Math.PI;
+	var newRawAngle = transform.angle - degrees;
+	var newAngle = (newRawAngle%360 + 360)%360;
+	if (newAngle>180) { newAngle = newAngle-360; }
+	// console.log(`y=${y}, x=${x}, degrees=${degrees} newRawAngle=${newRawAngle}, newAngle=${newAngle}`);
+	transform.setRotate(newAngle, rect.x.animVal.value, rect.y.animVal.value);
+	/*
+	  TODO(zellyn): this works, ish. If you drag the rect, or if
+	  the original rotation wasn't about the top left corner, the
+	  rotation will be about some other point, and the rect will
+	  suddenly jump.
+
+	  The solution is probably to wrap each rect in a group that
+	  applies the x,y offset, and then the rect itself (and its
+	  rotation) always have a top left of 0,0.
+
+	  We might as well take the opportunity to put the drag
+	  corners into the SVG, as well as having a global click/drag
+	  handler, rather than one attached to each handle and each
+	  rect.
+	 */
+	var h = Math.max( rectXY.y-rect.y.animVal.value, 1 );
+	rect.setAttribute('height',h);
+	console.log(transform);
 	moveDotToRect();
       },false);
     })(a[i]);
