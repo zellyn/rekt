@@ -1,0 +1,221 @@
+<html>
+<head>
+<title>Dragging Transformed SVG Elements</title>
+<style type="text/css" media="screen">
+  html, body {
+    background:#eee; margin:0;
+  }
+  svg {
+      position:absolute; top:5%; left:5%; width:90%; height:90%;
+      background:#fff; border:1px solid #ccc
+  }
+  svg rect { stroke:#333 }
+
+  svg .dragg { cursor:move }
+  svg .resizer { opacity:0.3; fill:#ff0; stroke:#630;}
+  svg .rotator { opacity:0.3; fill:#0f0; stroke:#630;}
+
+</style>
+</head><body>
+<svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg" version="1.1" baseProfile="full" onload="addHandlers(evt)">
+  <g id="rect-5ca1ab1e" class="areaGroup" transform="translate(42, 17) rotate(20)">
+    <rect class="dragg area" x="0" y="0" width="30" height="15" fill="#6c6" />
+    <circle class="dragg resizer" r="3" cx="30" cy="15" />
+    <circle class="dragg rotator" r="3" cx="0" cy="15" />
+  </g>
+</svg>
+<script type="text/javascript">
+  /*
+    Credits:
+
+    Thanks to Phrogz for https://stackoverflow.com/a/5223921/23582
+    (and http://phrogz.net/svg/drag_under_transformation.xhtml),
+    explaining how to drag under transformation.
+
+    Thanks to Peter Collingridge for
+    http://www.petercollingridge.co.uk/tutorials/svg/interactive/dragging/,
+    explaining how to drag with svg-wide event listeners, and handling
+    mobile touches.
+
+    TODO(zellyn): figure out what's up with rotation.
+   */
+
+  // http://jointjs.com/blog/get-transform-to-element-polyfill.html
+  SVGElement.prototype.getTransformToElement = SVGElement.prototype.getTransformToElement || function(toElement) {
+    return toElement.getScreenCTM().inverse().multiply(this.getScreenCTM());
+  };
+
+  function addHandlers(evt) {
+    const svg = evt.target;
+    const svgNS = svg.getAttribute('xmlns');
+    var pt = svg.createSVGPoint();
+
+    class dragTypes {}
+    dragTypes.MOVE = 1;
+    dragTypes.RESIZE = 2;
+    dragTypes.ROTATE = 3;
+
+    function cursorPoint(evt){
+      if (evt.touches) { evt = evt.touches[0]; }
+      pt.x = evt.clientX; pt.y = evt.clientY;
+      return pt.matrixTransform(svg.getScreenCTM().inverse());
+    }
+
+    class DragAction {
+      constructor(evt, group, typ) {
+	this.group = group;
+	this.rect = group.getElementsByTagName('rect')[0];
+	this.resizer = group.getElementsByClassName('resizer')[0];
+	this.rotator = group.getElementsByClassName('rotator')[0];
+	this.typ = typ
+	this.mouseStart = cursorPoint(evt);
+	switch (typ) {
+	case dragTypes.MOVE:
+	  this.frame = this.group.parentNode;
+	  const m = this.group.transform.baseVal[0].matrix;
+	  this.elementStart = { x:m.e, y:m.f };
+	  break;
+	case dragTypes.RESIZE:
+	  this.frame = this.group;
+	  this.elementStart = { x:this.resizer.cx.animVal.value, y:this.resizer.cy.animVal.value };
+	  break;
+	case dragTypes.ROTATE:
+	  this.frame = this.group;
+	  this.elementStart = { x:0, y:this.rotator.cy.animVal.value };
+	  break;
+	default:
+	  throw `Unknown dragType: ${typ}`;
+	}
+      }
+
+      bringToFront() {
+	this.group.parentNode.appendChild(this.group);
+      }
+
+      static fromEvent(evt) {
+	const target = evt.target;
+	if (target.classList.contains('area')) {
+	  return new DragAction(evt, target.parentNode, dragTypes.MOVE);
+	}
+	if (target.classList.contains('resizer')) {
+	  return new DragAction(evt, target.parentNode, dragTypes.RESIZE);
+	}
+	if (target.classList.contains('rotator')) {
+	  return new DragAction(evt, target.parentNode, dragTypes.ROTATE);
+	}
+	throw `Cannot find dragArea group for element ${target}`;
+      }
+
+      drag(evt) {
+	var current = cursorPoint(evt);
+	pt.x = current.x - this.mouseStart.x;
+	pt.y = current.y - this.mouseStart.y;
+
+	var m = this.frame.getTransformToElement(svg).inverse();
+	m.e = m.f = 0;
+	pt = pt.matrixTransform(m);
+
+	switch (this.typ) {
+	case dragTypes.MOVE:
+	  this.move(pt);
+	  break;
+	case dragTypes.RESIZE:
+	  this.resize(pt);
+	  break;
+	case dragTypes.ROTATE:
+	  this.rotate(pt)
+	  break;
+	default:
+	  throw `Unknown dragType: ${this.typ}`;
+	}
+      }
+
+      move(pt) {
+	const m = this.group.transform.baseVal[0].matrix;
+	m.e = this.elementStart.x + pt.x;
+	m.f = this.elementStart.y + pt.y;
+      }
+
+      resize(pt) {
+	const newX = this.elementStart.x + pt.x;
+	const newY = this.elementStart.y + pt.y;
+	this.resizer.cx.baseVal.value = newX;
+	this.resizer.cy.baseVal.value = newY;
+	var w = Math.max( newX, 1 );
+	var h = Math.max( newY, 1 );
+	this.rect.width.baseVal.value = w;
+	this.rect.height.baseVal.value = h;
+	this.setRotator();
+      }
+
+      rotate(pt) {
+	const r = this.group.transform.baseVal[1];
+	const newX = this.elementStart.x + pt.x;
+	const newY = this.elementStart.y + pt.y;
+	this.rotator.cy.baseVal.value = newY;
+	var radians = Math.atan2(-newY, newX) + Math.PI * 1 / 2;
+	var degrees = radians * 180 / Math.PI;
+	var newRawAngle = r.angle - degrees;
+	var newAngle = (newRawAngle%360 + 360)%360;
+	if (newAngle>180) { newAngle = newAngle-360; }
+	r.setRotate(newAngle, 0, 0);
+	var h = Math.max( newY, 1 );
+	this.rect.height.baseVal.value = h;
+	this.setResizer();
+      }
+
+      setResizer() {
+	this.resizer.cx.baseVal.value = this.rect.width.animVal.value;
+	this.resizer.cy.baseVal.value = this.rect.height.animVal.value;
+      }
+
+      setRotator() {
+	this.rotator.cy.baseVal.value = this.rect.height.animVal.value;
+      }
+
+      endDrag() {
+	this.setResizer();
+	this.setRotator();
+      }
+    }
+
+
+    // Action holds the currently-active drag event.
+    var action = null;
+
+    function startDrag(evt) {
+      if (evt.target.classList.contains('dragg')) {
+	action = DragAction.fromEvent(evt);
+	action.bringToFront();
+      }
+    }
+
+    function drag(evt) {
+      if (action) {
+	evt.preventDefault();
+	action.drag(evt);
+      }
+    }
+
+    function endDrag(evt) {
+      if (action) {
+	action.endDrag();
+      }
+      action = null;
+    }
+
+    svg.addEventListener('mousedown', startDrag);
+    svg.addEventListener('mousemove', drag);
+    svg.addEventListener('mouseup', endDrag);
+    svg.addEventListener('mouseleave', endDrag);
+
+    // For mobile.
+    svg.addEventListener('touchstart', startDrag);
+    svg.addEventListener('touchmove', drag);
+    svg.addEventListener('touchend', endDrag);
+    svg.addEventListener('touchleave', endDrag);
+    svg.addEventListener('touchcancel', endDrag);
+  }
+</script>
+<div id="dragcatch"></div>
+</body></html>
