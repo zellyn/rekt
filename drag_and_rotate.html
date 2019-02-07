@@ -7,21 +7,23 @@
   }
   svg {
       position:absolute; top:5%; left:5%; width:90%; height:90%;
-      background:#fff; border:1px solid #ccc
+      background:#fff; border:1px solid #ccc;
+      stroke-width:0.5px;
   }
-  svg rect { stroke:#333 }
+  svg rect { stroke:#333; fill:#6c6 }
 
   svg .dragg { cursor:move }
-  svg .resizer { opacity:0.3; fill:#ff0; stroke:#630;}
-  svg .rotator { opacity:0.3; fill:#0f0; stroke:#630;}
+  svg .resizer { opacity:0.05; fill:#ff0; stroke:#630; }
+  svg .rotator { opacity:0.05; fill:#0f0; stroke:#630; }
 
+  svg g:hover > circle { opacity:0.3; }
 </style>
 </head><body>
-<svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg" version="1.1" baseProfile="full" onload="addHandlers(evt)">
-  <g id="rect-5ca1ab1e" class="areaGroup" transform="translate(42, 17) rotate(20)">
-    <rect class="dragg area" x="0" y="0" width="30" height="15" fill="#6c6" />
-    <circle class="dragg resizer" r="3" cx="30" cy="15" />
+    <svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg" version="1.1" baseProfile="full" onload="addHandlers(evt)">
+  <g id="rect-5ca1ab1e" transform="translate(42, 17) rotate(20)">
+    <rect class="dragg area" x="0" y="0" width="30" height="15" />
     <circle class="dragg rotator" r="3" cx="0" cy="15" />
+    <circle class="dragg resizer" r="3" cx="30" cy="15" />
   </g>
 </svg>
 <script type="text/javascript">
@@ -42,7 +44,7 @@
 
   // http://jointjs.com/blog/get-transform-to-element-polyfill.html
   SVGElement.prototype.getTransformToElement = SVGElement.prototype.getTransformToElement || function(toElement) {
-    return toElement.getScreenCTM().inverse().multiply(this.getScreenCTM());
+      return toElement.getScreenCTM().inverse().multiply(this.getScreenCTM());
   };
 
   function addHandlers(evt) {
@@ -50,48 +52,37 @@
     const svgNS = svg.getAttribute('xmlns');
     var pt = svg.createSVGPoint();
 
-    class dragTypes {}
-    dragTypes.MOVE = 1;
-    dragTypes.RESIZE = 2;
-    dragTypes.ROTATE = 3;
+    const dragTypes = {
+      'MOVE': 'MOVE',
+      'RESIZE': 'RESIZE',
+      'ROTATE': 'ROTATE',
+      'CREATE': 'CREATE',
+    }
 
-    function cursorPoint(evt){
+    // cursorPoint returns the svg-relative coordinates of a mouse click/touch.
+    function cursorPoint(evt) {
       if (evt.touches) { evt = evt.touches[0]; }
       pt.x = evt.clientX; pt.y = evt.clientY;
       return pt.matrixTransform(svg.getScreenCTM().inverse());
     }
 
+    function createOn(root, name, prop){
+      const el = document.createElementNS(svgNS, name);
+      for (var a in prop) if (prop.hasOwnProperty(a)) el.setAttribute(a, prop[a]);
+      return root.appendChild(el);
+    }
+
+    function makeUid(bytes) {
+      return [...Array(2*bytes)].map(_=>Math.floor(Math.random()*16).toString(16)).join('');
+    }
+
+    function transformOffset(offset, frame) {
+      const m = frame.getTransformToElement(svg).inverse();
+      m.e = m.f = 0; // clear out translation vector
+      return offset.matrixTransform(m);
+    }
+
     class DragAction {
-      constructor(evt, group, typ) {
-	this.group = group;
-	this.rect = group.getElementsByTagName('rect')[0];
-	this.resizer = group.getElementsByClassName('resizer')[0];
-	this.rotator = group.getElementsByClassName('rotator')[0];
-	this.typ = typ
-	this.mouseStart = cursorPoint(evt);
-	switch (typ) {
-	case dragTypes.MOVE:
-	  this.frame = this.group.parentNode;
-	  const m = this.group.transform.baseVal[0].matrix;
-	  this.elementStart = { x:m.e, y:m.f };
-	  break;
-	case dragTypes.RESIZE:
-	  this.frame = this.group;
-	  this.elementStart = { x:this.resizer.cx.animVal.value, y:this.resizer.cy.animVal.value };
-	  break;
-	case dragTypes.ROTATE:
-	  this.frame = this.group;
-	  this.elementStart = { x:0, y:this.rotator.cy.animVal.value };
-	  break;
-	default:
-	  throw `Unknown dragType: ${typ}`;
-	}
-      }
-
-      bringToFront() {
-	this.group.parentNode.appendChild(this.group);
-      }
-
       static fromEvent(evt) {
 	const target = evt.target;
 	if (target.classList.contains('area')) {
@@ -103,89 +94,154 @@
 	if (target.classList.contains('rotator')) {
 	  return new DragAction(evt, target.parentNode, dragTypes.ROTATE);
 	}
-	throw `Cannot find dragArea group for element ${target}`;
+	return new DragAction(evt, null, dragTypes.CREATE);
+      }
+
+      constructor(evt, group, typ) {
+	this.typ = typ
+	this.mouseStart = cursorPoint(evt);
+	if (typ === dragTypes.CREATE) {
+	  console.log('CREATE');
+	  return;
+	}
+
+	this.group = group;
+	this.parent = group.parentNode;
+	this.rect = group.getElementsByTagName('rect')[0];
+	this.resizer = group.getElementsByClassName('resizer')[0];
+	this.rotator = group.getElementsByClassName('rotator')[0];
+	switch (typ) {
+	case dragTypes.MOVE:
+	  this.elementStart = this.coords();
+	  break;
+	case dragTypes.RESIZE:
+	  this.elementStart = { x:this.resizer.cx.animVal.value, y:this.resizer.cy.animVal.value };
+	  break;
+	case dragTypes.ROTATE:
+	  this.elementStart = this.rotParentCoords();
+	  break;
+	case dragTypes.CREATE:
+	  break; // Just use mouseStart
+	default:
+	  throw `Unknown dragType: ${typ}`;
+	}
       }
 
       drag(evt) {
-	var current = cursorPoint(evt);
+	if (this.typ === dragTypes.CREATE) {
+	  console.log('DRAG_CREATE');
+	  this.createRect();
+	}
+	const current = cursorPoint(evt);
 	pt.x = current.x - this.mouseStart.x;
 	pt.y = current.y - this.mouseStart.y;
 
-	var m = this.frame.getTransformToElement(svg).inverse();
-	m.e = m.f = 0;
-	pt = pt.matrixTransform(m);
+	const frame = (this.typ == dragTypes.RESIZE) ? this.rect : this.parent;
+
+	const offset = transformOffset(pt, frame);
 
 	switch (this.typ) {
 	case dragTypes.MOVE:
-	  this.move(pt);
+	  this.move(offset);
 	  break;
 	case dragTypes.RESIZE:
-	  this.resize(pt);
+	  this.resize(offset);
 	  break;
 	case dragTypes.ROTATE:
-	  this.rotate(pt)
+	  this.rotate(offset)
 	  break;
 	default:
 	  throw `Unknown dragType: ${this.typ}`;
 	}
       }
 
-      move(pt) {
+      coords() {
 	const m = this.group.transform.baseVal[0].matrix;
-	m.e = this.elementStart.x + pt.x;
-	m.f = this.elementStart.y + pt.y;
+	return { x:m.e, y:m.f };
       }
 
-      resize(pt) {
-	const newX = this.elementStart.x + pt.x;
-	const newY = this.elementStart.y + pt.y;
-	this.resizer.cx.baseVal.value = newX;
-	this.resizer.cy.baseVal.value = newY;
-	var w = Math.max( newX, 1 );
-	var h = Math.max( newY, 1 );
+      bringToFront() {
+	if (this.group.nextElementSibling) {
+	  this.parent.appendChild(this.group);
+	}
+      }
+
+      createRect() {
+	this.typ = dragTypes.RESIZE;
+	this.elementStart = {x:0, y:0};
+	this.parent = svg;
+	const coords = this.mouseStart.matrixTransform(svg.getTransformToElement(this.parent));
+	const uid = makeUid(16);
+
+	const group = createOn(this.parent, 'g', {
+	  'id': 'rect-' + uid,
+	  'x': coords.x,
+	  'y': coords.y,
+	  'transform': `translate(${coords.x}, ${coords.y}) rotate(0)`,
+	});
+	const rect = createOn(group, 'rect', {'class': 'dragg area'});
+	const rotator = createOn(group, 'circle', {'class': 'dragg rotator', 'r': 3});
+	const resizer = createOn(group, 'circle', {'class': 'dragg resizer', 'r': 3});
+
+	this.group = group;
+	this.rect = rect;
+	this.resizer = resizer;
+	this.rotator = rotator;
+
+	console.log(this.parent);
+      }
+
+      rotParentCoords() {
+	pt.x = this.rotator.cx.animVal.value;
+	pt.y = this.rotator.cy.animVal.value;
+	return pt.matrixTransform(this.rect.getTransformToElement(this.parent));
+      }
+
+      move(offset) {
+	const m = this.group.transform.baseVal[0].matrix;
+	m.e = this.elementStart.x + offset.x;
+	m.f = this.elementStart.y + offset.y;
+      }
+
+      resize(offset) {
+	const w = Math.max(this.elementStart.x + offset.x, 1);
+	const h = Math.max(this.elementStart.y + offset.y, 1);
 	this.rect.width.baseVal.value = w;
 	this.rect.height.baseVal.value = h;
-	this.setRotator();
+	this.updateHandles();
       }
 
-      rotate(pt) {
+      rotate(offset) {
+	const newX = this.elementStart.x + offset.x;
+	const newY = this.elementStart.y + offset.y;
+	const coords = this.coords();
+	const deltaX = coords.x-newX;
+	const deltaY = coords.y-newY;
+	var radians = Math.atan2(deltaY, deltaX) + Math.PI * 5 / 2;
+	var degrees = (radians * 180 / Math.PI) % 360;
+	if (degrees>180) { degrees = degrees-360; }
 	const r = this.group.transform.baseVal[1];
-	const newX = this.elementStart.x + pt.x;
-	const newY = this.elementStart.y + pt.y;
-	this.rotator.cy.baseVal.value = newY;
-	var radians = Math.atan2(-newY, newX) + Math.PI * 1 / 2;
-	var degrees = radians * 180 / Math.PI;
-	var newRawAngle = r.angle - degrees;
-	var newAngle = (newRawAngle%360 + 360)%360;
-	if (newAngle>180) { newAngle = newAngle-360; }
-	r.setRotate(newAngle, 0, 0);
-	var h = Math.max( newY, 1 );
+	r.setRotate(degrees, 0, 0);
+	const h = Math.max(Math.sqrt(deltaX*deltaX + deltaY*deltaY), 1);
 	this.rect.height.baseVal.value = h;
-	this.setResizer();
+	this.updateHandles();
       }
 
-      setResizer() {
-	this.resizer.cx.baseVal.value = this.rect.width.animVal.value;
-	this.resizer.cy.baseVal.value = this.rect.height.animVal.value;
-      }
-
-      setRotator() {
-	this.rotator.cy.baseVal.value = this.rect.height.animVal.value;
-      }
-
-      endDrag() {
-	this.setResizer();
-	this.setRotator();
+      updateHandles() {
+	const w = this.rect.width.animVal.value;
+	const h = this.rect.height.animVal.value;
+	this.resizer.cx.baseVal.value = w;
+	this.resizer.cy.baseVal.value = h;
+	this.rotator.cy.baseVal.value = h;
       }
     }
-
 
     // Action holds the currently-active drag event.
     var action = null;
 
     function startDrag(evt) {
-      if (evt.target.classList.contains('dragg')) {
-	action = DragAction.fromEvent(evt);
+      action = DragAction.fromEvent(evt);
+      if (action.typ !== dragTypes.CREATE) {
 	action.bringToFront();
       }
     }
@@ -198,9 +254,6 @@
     }
 
     function endDrag(evt) {
-      if (action) {
-	action.endDrag();
-      }
       action = null;
     }
 
