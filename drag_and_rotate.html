@@ -6,11 +6,11 @@
     background:#eee; margin:0;
   }
   svg {
-      position:absolute; top:5%; left:5%; width:90%; height:90%;
+      /* position:absolute; top:5%; left:5%; width:90%; height:90%; */
       background:#fff; border:1px solid #ccc;
       stroke-width:0.5px;
   }
-  svg rect { stroke:#333; fill:#6c6 }
+  svg rect.dragg { stroke:#333; fill:#6c6; opacity:0.3; }
 
   svg .dragg { cursor:move }
   svg .resizer { opacity:0.05; fill:#ff0; stroke:#630; }
@@ -19,11 +19,28 @@
   svg g:hover > circle { opacity:0.3; }
 </style>
 </head><body>
-    <svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg" version="1.1" baseProfile="full" onload="addHandlers(evt)">
-  <g id="rect-5ca1ab1e" transform="translate(42, 17) rotate(20)">
-    <rect class="dragg area" x="0" y="0" width="30" height="15" />
-    <circle class="dragg rotator" r="3" cx="0" cy="15" />
-    <circle class="dragg resizer" r="3" cx="30" cy="15" />
+    <svg viewBox="50 55 400 1020" xmlns="http://www.w3.org/2000/svg" version="1.1" baseProfile="full" onload="addHandlers(evt)">
+  <defs>
+    <pattern id="scan" patternUnits="userSpaceOnUse" width="850" height="1100" patternTransform="rotate(0.8, 69, 75)">
+      <image xlink:href="understanding_the_apple_ii_0007.png" x="0" y="0" width="850" height="1100" />
+    </pattern>
+  </defs>
+  <g transform="rotate(-0.8, 69, 75)">
+    <rect x="69" y="75" width="363" height="981" fill="url(#scan)" />
+  </g>
+
+  <g id="rects">
+    <g id="rect-5ca1ab1e" transform="translate(142, 271) rotate(20)">
+      <rect class="dragg area" x="0" y="0" width="30" height="15" />
+      <circle class="dragg rotator" r="3" cx="0" cy="15" />
+      <circle class="dragg resizer" r="3" cx="30" cy="15" />
+    </g>
+
+    <g id="rect-f01dab1e" transform="translate(68.0957, 76.2188) rotate(-0.847341)">
+      <rect class="dragg area" x="0" y="0" width="363.003" height="127.546"></rect>
+      <circle class="dragg rotator" r="3" cx="0" cy="127.546"></circle>
+      <circle class="dragg resizer" r="3" cx="363.003" cy="127.546"></circle>
+    </g>
   </g>
 </svg>
 <script type="text/javascript">
@@ -49,6 +66,7 @@
 
   function addHandlers(evt) {
     const svg = evt.target;
+    const rects = svg.getElementById('rects');
     const svgNS = svg.getAttribute('xmlns');
     var pt = svg.createSVGPoint();
 
@@ -169,7 +187,7 @@
       createRect() {
 	this.typ = dragTypes.RESIZE;
 	this.elementStart = {x:0, y:0};
-	this.parent = svg;
+	this.parent = rects;
 	const coords = this.mouseStart.matrixTransform(svg.getTransformToElement(this.parent));
 	const uid = makeUid(16);
 
