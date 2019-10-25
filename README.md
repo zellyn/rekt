@@ -13,3 +13,9 @@ Preview: [drag_and_rotate.html](http://htmlpreview.github.io/?https://github.com
 - [ ] Handling keypresses in a web component
 - [ ] Wrapping it up in a web component
 - [ ] Handling keypresses in a web component in an Elm app 🤷
+
+# TODOs
+
+- [ ] Convert to web component
+- [ ] Go through https://developers.google.com/web/fundamentals/web-components/best-practices
+- [ ] Go through https://developers.google.com/web/fundamentals/web-components/examples/howto-checkbox
