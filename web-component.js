@@ -23,6 +23,28 @@ function createSVGElement(qualifiedName, attributes, ...children) {
   return elem;
 }
 
+// https://stackoverflow.com/a/16436975/23582
+function arraysEqual(a, b) {
+  if (a === b) return true;
+  if (a == null || b == null) return false;
+  if (a.length != b.length) return false;
+
+  for (const i = 0; i < a.length; i++) {
+    if (a[i] !== b[i]) return false;
+  }
+  return true;
+}
+
+function rectsEqual(a, b) {
+  if (a === b) return true;
+  if (a.id !== b.id) return false;
+  if (a.x !== b.x) return false;
+  if (a.y !== b.y) return false;
+  if (a.width !== b.width) return false;
+  if (a.height !== b.height) return false;
+  if (a.rotate !== b.rotate) return false;
+}
+
 class RektEditor extends HTMLElement {
   constructor() {
     super()
@@ -50,7 +72,7 @@ class RektEditor extends HTMLElement {
         stroke-width:0.5px;
     }
 
-    /* rect { stroke: #f00; } */
+    /* rect#bgimg { stroke: #f00; } */
 
     svg rect.dragg { stroke:#333; fill:#6c6; opacity:0.3; }
 
@@ -92,6 +114,7 @@ class RektEditor extends HTMLElement {
       // y: 75,
       // width: 363,
       // height: 981,
+      id: 'bgimg',
       fill: 'url(#scan)',
     });
     this._elems.backgroundRect = rect;
@@ -103,11 +126,16 @@ class RektEditor extends HTMLElement {
       rect);
     this._elems.backgroundGroup = imageG;
 
+    const rects = createSVGElement('g', {
+      id: 'rects',
+    });
+    this._elems.rects = rects;
+
     const svg = createSVGElement('svg',
       {
         // viewBox: '50 55 400 1020',
       },
-      defs, imageG);
+      defs, imageG, rects);
     this._elems.svg = svg;
 
     /*
@@ -123,6 +151,10 @@ class RektEditor extends HTMLElement {
     shadow.appendChild(style);
     shadow.appendChild(span);
     shadow.appendChild(svg);
+
+    this._rects = {};
+    this._rectOrder = [];
+    this._aciveRect = null;
   }
 
   connectedCallback() {
@@ -134,6 +166,7 @@ class RektEditor extends HTMLElement {
     this._upgradeProperty('bgx');
     this._upgradeProperty('bgy');
     this._upgradeProperty('bgrotate');
+    this._upgradeProperty('rectangles');
   }
 
   _upgradeProperty(prop) {
@@ -285,6 +318,125 @@ class RektEditor extends HTMLElement {
         this._setViewBox();
         break;
     }
+  }
+
+  get rectangles() {
+    return this._rectOrder.map(id => this._rects[id]);
+  }
+
+  set rectangles(newValue) {
+    const err = this._invalidRects(newValue);
+    if (err) {
+      throw `Invalid rects value (${err}): ${JSON.stringify(newValue)}`;
+    }
+
+    const newIds = new Set(newValue.map(rect => rect.id));
+    for (const id of [...this._rectOrder]) {
+      if (!newIds.has(id)) {
+        this._deleteRect(id);
+      }
+    }
+
+    newValue.forEach(rect => {
+      const oldRect = this._rects[rect.id];
+      if (!oldRect) {
+        this._addRect(rect);
+      } else if (!rectsEqual(rect, oldRect)) {
+        this._updateRect(rect);
+      }
+    });
+  }
+
+  _invalidRects(rects) {
+    if (!Array.isArray(rects)) return 'must be array';
+    const want = ['x', 'y', 'width', 'height', 'id', 'rotate'];
+    for (const i in rects) {
+      const rect = rects[i];
+      const keys = new Set(Object.keys(rect));
+      for (const key of want) {
+        if (!keys.has(key)) return `#${i} has no ${key} property`;
+      }
+    }
+
+    // Check for only one active
+    return '';
+  }
+
+  _deleteRect(id) {
+    if (!this.rects[id]) {
+      console.warn('cannot delete unknown rect with id "%s"', id);
+      return;
+    }
+    const orderIndex = this._rectOrder.indexOf(id);
+    if (orderIndex >= 0) {
+      this._rectOrder.splice(index, 1);
+      if (this._aciveRect >= orderIndex && this._activeRect > 0) {
+        this._activeRect--;
+      }
+    }
+    delete this._rects[id];
+    const node = this.shadowRoot.getElementById(id);
+    if (node) {
+      this._elems.rects.removeChild(node);
+    } else {
+      console.warn('rect with id "%s" not found in DOM', id);
+    }
+    this._updateActiveRect();
+  }
+
+  _updateActiveRect() {
+    // pass
+  }
+
+  _updateRect(rect) {
+
+  }
+  _addRect(rect) {
+    this._rects[rect.id] = rect;
+    this._rectOrder.push(rect.id);
+    /*
+    <g id="rect-5ca1ab1e" transform="translate(142, 271) rotate(20)">
+      <rect class="dragg area" x="0" y="0" width="30" height="15" />
+      <circle class="dragg rotator" r="3" cx="0" cy="15" />
+      <circle class="dragg resizer" r="3" cx="30" cy="15" />
+    </g>
+    */
+
+    const svgRect = createSVGElement('rect',
+      {
+        class: 'dragg area',
+        x: 0,
+        y: 0,
+        width: rect.width,
+        height: rect.height,
+      }
+    );
+
+    const circle1 = createSVGElement('circle',
+      {
+        class: 'dragg rotator',
+        r: 3,
+        cx: 0,
+        cy: rect.height,
+      }
+    );
+    const circle2 = createSVGElement('circle',
+      {
+        class: 'dragg resizer',
+        r: 3,
+        cx: rect.width,
+        cy: rect.height,
+      }
+    );
+
+    const g = createSVGElement('g',
+      {
+        id: rect.id,
+        transform: `translate(${rect.x}, ${rect.y}) rotate(${rect.rotate})`,
+      },
+      svgRect, circle1, circle2
+    );
+    this._elems.rects.appendChild(g);
   }
 }
 
