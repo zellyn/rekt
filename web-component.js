@@ -152,9 +152,12 @@ class RektEditor extends HTMLElement {
     shadow.appendChild(span);
     shadow.appendChild(svg);
 
+    // A map from rect id to rect object.
     this._rects = {};
+    // A list of rect ids.
     this._rectOrder = [];
-    this._aciveRect = null;
+    // 0-based index of active rect.
+    this._activeRect = null;
   }
 
   connectedCallback() {
@@ -363,14 +366,14 @@ class RektEditor extends HTMLElement {
   }
 
   _deleteRect(id) {
-    if (!this.rects[id]) {
+    if (!this._rects[id]) {
       console.warn('cannot delete unknown rect with id "%s"', id);
       return;
     }
     const orderIndex = this._rectOrder.indexOf(id);
     if (orderIndex >= 0) {
       this._rectOrder.splice(index, 1);
-      if (this._aciveRect >= orderIndex && this._activeRect > 0) {
+      if (this._activeRect >= orderIndex && this._activeRect > 0) {
         this._activeRect--;
       }
     }
@@ -385,12 +388,30 @@ class RektEditor extends HTMLElement {
   }
 
   _updateActiveRect() {
-    // pass
+    if (this._activeRect < 0 || this._activeRect > this._rectOrder.length) {
+      this._activeRect = 0;
+    }
+    // TODO(zellyn): update classes/order
   }
 
   _updateRect(rect) {
+    const g = this.shadowRoot.getElementById(rect.id);
+    if (!g) {
+      console.warn('rect with id "%s" not found in DOM', id);
+      return
+    }
 
+    g.setAttribute('transform', `translate(${rect.x}, ${rect.y}) rotate(${rect.rotate})`);
+    const svgRect = g.getElementsByTagName('rect')[0];
+    svgRect.setAttribute('width', rect.width);
+    svgRect.setAttribute('height', rect.height);
+    const rotator = g.getElementsByClassName('rotator')[0];
+    rotator.setAttribute('cy', rect.height);
+    const resizer = g.getElementsByClassName('resizer')[0];
+    resizer.setAttribute('cx', rect.width);
+    resizer.setAttribute('cy', rect.height);
   }
+
   _addRect(rect) {
     this._rects[rect.id] = rect;
     this._rectOrder.push(rect.id);
