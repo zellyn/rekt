@@ -1,3 +1,81 @@
+
+
+/*
+  Credits:
+
+  Thanks to Phrogz for https://stackoverflow.com/a/5223921/23582
+  (and http://phrogz.net/svg/drag_under_transformation.xhtml),
+  explaining how to drag under transformation.
+
+  Thanks to Peter Collingridge for
+  http://www.petercollingridge.co.uk/tutorials/svg/interactive/dragging/,
+  explaining how to drag with svg-wide event listeners, and handling
+  mobile touches.
+ */
+
+// http://jointjs.com/blog/get-transform-to-element-polyfill.html
+SVGElement.prototype.getTransformToElement = SVGElement.prototype.getTransformToElement || function (toElement) {
+  return toElement.getScreenCTM().inverse().multiply(this.getScreenCTM());
+};
+
+function makeUid(bytes) {
+  return [...Array(2 * bytes)].map(_ => Math.floor(Math.random() * 16).toString(16)).join('');
+}
+
+const dragTypes = {
+  'MOVE': 'MOVE',
+  'RESIZE': 'RESIZE',
+  'ROTATE': 'ROTATE',
+  'CREATE': 'CREATE',
+}
+
+// DragInfo holds information about the current drag.
+class DragInfo {
+  constructor(group, typ, mouseStart) {
+    this.typ = typ;
+    this.mouseStart = mouseStart;
+    if (typ === dragTypes.CREATE) {
+      console.log('CREATE');
+      return;
+    }
+
+    this.group = group;
+    this.svg = group.ownerSVGElement;
+    this.parent = group.parentNode;
+    this.rect = group.getElementsByTagName('rect')[0];
+    this.resizer = group.getElementsByClassName('resizer')[0];
+    this.rotator = group.getElementsByClassName('rotator')[0];
+    switch (typ) {
+      case dragTypes.MOVE:
+        this.elementStart = this.coords();
+        break;
+      case dragTypes.RESIZE:
+        this.elementStart = { x: this.resizer.cx.animVal.value, y: this.resizer.cy.animVal.value };
+        break;
+      case dragTypes.ROTATE:
+        this.elementStart = this.rotParentCoords();
+        break;
+      case dragTypes.CREATE:
+        break; // Just use mouseStart
+      default:
+        throw `Unknown dragType: ${typ}`;
+    }
+  }
+
+  rotParentCoords() {
+    const pt = this.svg.createSVGPoint();
+    pt.x = this.rotator.cx.animVal.value;
+    pt.y = this.rotator.cy.animVal.value;
+    return pt.matrixTransform(this.rect.getTransformToElement(this.parent));
+  }
+
+  coords() {
+    const m = this.group.transform.baseVal[0].matrix;
+    return { x: m.e, y: m.f };
+  }
+}
+
+
 function createElement(qualifiedName, attributes, ...children) {
   const elem = document.createElement(qualifiedName);
   for (const [name, value] of Object.entries(attributes)) {
@@ -50,12 +128,12 @@ class RektEditor extends HTMLElement {
     super()
 
     // Create the shadow root.
-    const shadow = this.attachShadow({mode: 'open'});
+    const shadow = this.attachShadow({ mode: 'open' });
 
     this._elems = {};
 
     // Create span.
-    const span = createElement('span', {'class': 'hellospan'});
+    const span = createElement('span', { 'class': 'hellospan' });
     this._elems.span = span;
 
     // Create some CSS to apply to the shadow dom.
@@ -158,6 +236,27 @@ class RektEditor extends HTMLElement {
     this._rectOrder = [];
     // 0-based index of active rect.
     this._activeRect = null;
+
+    // The currently active drag event.
+    this._dragInfo = null;
+
+    // Add event handlers.
+
+    svg.addEventListener('mousedown', e => this.startDrag(e));
+    svg.addEventListener('mousemove', e => this.drag(e));
+    svg.addEventListener('mouseup', e => this.endDrag(e));
+    svg.addEventListener('mouseleave', e => this.endDrag);
+    // For mobile.
+    // TODO(zellyn): figure out why these cause this and how to do it properly:
+    //   [Violation] Added non-passive event listener to a
+    //   scroll-blocking 'touchstart' event. Consider marking event
+    //   handler as 'passive' to make the page more responsive. See
+    //   https://www.chromestatus.com/feature/5745543795965952
+    // svg.addEventListener('touchstart', this.startDrag);
+    // svg.addEventListener('touchmove', this.drag);
+    // svg.addEventListener('touchend', this.endDrag);
+    // svg.addEventListener('touchleave', this.endDrag);
+    // svg.addEventListener('touchcancel', this.endDrag);
   }
 
   connectedCallback() {
@@ -188,7 +287,7 @@ class RektEditor extends HTMLElement {
     const c = Math.cos(rads);
     const initial = [[0, 0], [+width, 0], [0, +height], [+width, +height]];
     const points = initial
-      .map(([x, y]) => [(x*c) + (y*s), (y*c) - (x*s)])
+      .map(([x, y]) => [(x * c) + (y * s), (y * c) - (x * s)])
       .map(([x, y]) => [+cx + x, +cy + y]);
     const xs = points.map(([x, y]) => x);
     const ys = points.map(([x, y]) => y);
@@ -281,7 +380,7 @@ class RektEditor extends HTMLElement {
     const height = this.getAttribute('bgheight');
     const rotate = this.getAttribute('bgrotate');
     const [[minx, miny], [maxx, maxy]] = this._minMax(x, y, width, height, rotate);
-    this._elems.svg.setAttribute('viewBox', `${minx-border} ${miny-border} ${maxx-minx+border*2} ${maxy-miny+border*2}`);
+    this._elems.svg.setAttribute('viewBox', `${minx - border} ${miny - border} ${maxx - minx + border * 2} ${maxy - miny + border * 2}`);
   }
 
   attributeChangedCallback(name, oldValue, newValue) {
@@ -458,6 +557,161 @@ class RektEditor extends HTMLElement {
       svgRect, circle1, circle2
     );
     this._elems.rects.appendChild(g);
+
+    return [g, svgRect, circle1, circle2];
+  }
+
+  // Event handling for dragging, clicking, etc.
+
+  startDrag(evt) {
+    const target = evt.target;
+    const mouseStart = this.cursorPoint(evt);
+    if (target.classList.contains('area')) {
+      this._dragInfo = new DragInfo(target.parentNode, dragTypes.MOVE, mouseStart);
+    } else if (target.classList.contains('resizer')) {
+      this._dragInfo = new DragInfo(target.parentNode, dragTypes.RESIZE, mouseStart);
+    } else if (target.classList.contains('rotator')) {
+      this._dragInfo = new DragInfo(target.parentNode, dragTypes.ROTATE, mouseStart);
+    } else {
+      this._dragInfo = new DragInfo(null, dragTypes.CREATE, mouseStart);
+    }
+
+    if (this._dragInfo.typ !== dragTypes.CREATE) {
+      this.bringToFront();
+    }
+  }
+
+  drag(evt) {
+    const di = this._dragInfo;
+    if (!di) {
+      return;
+    }
+
+    evt.preventDefault();
+
+    if (this._dragInfo.typ === dragTypes.CREATE) {
+      console.log('DRAG_CREATE');
+      this.createDraggedRect();
+    }
+    // TODO(zellyn): insert rest of DragAction.drag contents here.
+
+    const current = this.cursorPoint(evt);
+    const pt = this._elems.svg.createSVGPoint();
+    pt.x = current.x - di.mouseStart.x;
+    pt.y = current.y - di.mouseStart.y;
+
+    const frame = (di.typ == dragTypes.RESIZE) ? di.rect : di.parent;
+
+    const offset = this.transformOffset(pt, frame);
+
+    switch (di.typ) {
+    case dragTypes.MOVE:
+      this.moveRect(offset);
+      break
+    case dragTypes.RESIZE:
+      this.resizeRect(offset);
+      break;
+    case dragTypes.ROTATE:
+      this.rotateRect(offset);
+      break;
+    default:
+      throw `Unknown dragType: ${di.typ}`;
+    }
+  }
+
+  moveRect(offset) {
+    const di = this._dragInfo;
+    const m = di.group.transform.baseVal[0].matrix;
+    m.e = di.elementStart.x + offset.x;
+    m.f = di.elementStart.y + offset.y;
+  }
+
+  resizeRect(offset) {
+    const di = this._dragInfo;
+    const w = Math.max(di.elementStart.x + offset.x, 1);
+    const h = Math.max(di.elementStart.y + offset.y, 1);
+    di.rect.width.baseVal.value = w;
+    di.rect.height.baseVal.value = h;
+    this.updateHandles();
+  }
+
+  rotateRect(offset) {
+    const di = this._dragInfo;
+    const newX = di.elementStart.x + offset.x;
+    const newY = di.elementStart.y + offset.y;
+    const coords = di.coords();
+    const deltaX = coords.x-newX;
+    const deltaY = coords.y-newY;
+    var radians = Math.atan2(deltaY, deltaX) + Math.PI * 5 / 2;
+    var degrees = (radians * 180 / Math.PI) % 360;
+    if (degrees>180) { degrees = degrees-360; }
+    const r = di.group.transform.baseVal[1];
+    r.setRotate(degrees, 0, 0);
+    const h = Math.max(Math.sqrt(deltaX*deltaX + deltaY*deltaY), 1);
+    di.rect.height.baseVal.value = h;
+    this.updateHandles();
+  }
+
+  updateHandles() {
+    const di = this._dragInfo;
+    const w = di.rect.width.animVal.value;
+    const h = di.rect.height.animVal.value;
+    di.resizer.cx.baseVal.value = w;
+    di.resizer.cy.baseVal.value = h;
+    di.rotator.cy.baseVal.value = h;
+  }
+
+  createDraggedRect() {
+    const di = this._dragInfo;
+    di.typ = dragTypes.RESIZE;
+    di.elementStart = { x: 0, y: 0 };
+    di.parent = this._elems.rects;
+    const coords = di.mouseStart.matrixTransform(this._elems.svg.getTransformToElement(di.parent));
+    const uid = makeUid(16);
+
+    const [group, rect, rotator, resizer] = this._addRect({
+      id: 'rect-' + uid,
+      x: coords.x,
+      y: coords.y,
+      width: 0,
+      height: 0,
+      rotate: 0, // TODO(zellyn): use default rotation.
+    });
+
+    di.group = group;
+    di.rect = rect;
+    di.resizer = resizer;
+    di.rotator = rotator;
+  }
+
+  endDrag(evt) {
+    this._dragInfo = null;
+  }
+
+  // cursorPoint returns the svg-relative coordinates of a mouse click/touch.
+  cursorPoint(evt) {
+    if (evt.touches) { evt = evt.touches[0]; }
+    const pt = this._elems.svg.createSVGPoint();
+    pt.x = evt.clientX; pt.y = evt.clientY;
+    return pt.matrixTransform(this._elems.svg.getScreenCTM().inverse());
+  }
+
+  transformOffset(offset, frame) {
+    const m = frame.getTransformToElement(this._elems.svg).inverse();
+    m.e = m.f = 0; // clear out translation vector
+    return offset.matrixTransform(m);
+  }
+
+  bringToFront() {
+    if (!this._dragInfo) {
+      console.log('bringToFront called when no drag is active');
+      return;
+    }
+
+    if (this._dragInfo.group.nextElementSibling) {
+      this._dragInfo.parent.appendChild(this._dragInfo.group);
+      // TODO(zellyn): set this._activeRect
+    }
   }
 }
 
