@@ -131,6 +131,11 @@ class RektEditor extends HTMLElement {
     const shadow = this.attachShadow({ mode: 'open' });
 
     this._elems = {};
+    this._handlers = {
+      startDrag: e => this.startDrag(e),
+      drag: e => this.drag(e),
+      endDrag: e => this.endDrag(e),
+    };
 
     // Create span.
     const span = createElement('span', { 'class': 'hellospan' });
@@ -239,24 +244,6 @@ class RektEditor extends HTMLElement {
 
     // The currently active drag event.
     this._dragInfo = null;
-
-    // Add event handlers.
-
-    svg.addEventListener('mousedown', e => this.startDrag(e));
-    svg.addEventListener('mousemove', e => this.drag(e));
-    svg.addEventListener('mouseup', e => this.endDrag(e));
-    svg.addEventListener('mouseleave', e => this.endDrag);
-    // For mobile.
-    // TODO(zellyn): figure out why these cause this and how to do it properly:
-    //   [Violation] Added non-passive event listener to a
-    //   scroll-blocking 'touchstart' event. Consider marking event
-    //   handler as 'passive' to make the page more responsive. See
-    //   https://www.chromestatus.com/feature/5745543795965952
-    // svg.addEventListener('touchstart', this.startDrag);
-    // svg.addEventListener('touchmove', this.drag);
-    // svg.addEventListener('touchend', this.endDrag);
-    // svg.addEventListener('touchleave', this.endDrag);
-    // svg.addEventListener('touchcancel', this.endDrag);
   }
 
   connectedCallback() {
@@ -269,6 +256,25 @@ class RektEditor extends HTMLElement {
     this._upgradeProperty('bgy');
     this._upgradeProperty('bgrotate');
     this._upgradeProperty('rectangles');
+
+    // Add event handlers.
+    const svg = this._elems.svg;
+
+    svg.addEventListener('mousedown', this._handlers.startDrag);
+    svg.addEventListener('mousemove', this._handlers.drag);
+    svg.addEventListener('mouseup', this._handlers.endDrag);
+    svg.addEventListener('mouseleave', this._handlers.endDrag);
+    // For mobile.
+    // TODO(zellyn): figure out why these cause this and how to do it properly:
+    //   [Violation] Added non-passive event listener to a
+    //   scroll-blocking 'touchstart' event. Consider marking event
+    //   handler as 'passive' to make the page more responsive. See
+    //   https://www.chromestatus.com/feature/5745543795965952
+    // svg.addEventListener('touchstart', this.startDrag);
+    // svg.addEventListener('touchmove', this.drag);
+    // svg.addEventListener('touchend', this.endDrag);
+    // svg.addEventListener('touchleave', this.endDrag);
+    // svg.addEventListener('touchcancel', this.endDrag);
   }
 
   _upgradeProperty(prop) {
@@ -294,8 +300,14 @@ class RektEditor extends HTMLElement {
     return [[Math.min(...xs), Math.min(...ys)], [Math.max(...xs), Math.max(...ys)]];
   }
 
-  // disconnectedCallback() {
-  // }
+  disconnectedCallback() {
+    // Remove event handlers.
+    const svg = this._elems.svg;
+    svg.removeEventListener('mousedown', this._handlers.startDrag);
+    svgremoveEventListener('mousemove', this._handlers.drag);
+    svgremoveEventListener('mouseup', e => this._handlers.endDrag);
+    svgremoveEventListener('mouseleave', e => this._handlers.endDrag);
+  }
 
   static get observedAttributes() {
     return ['bgimage', 'bgimagewidth', 'bgimageheight', 'bgwidth', 'bgheight', 'bgx', 'bgy', 'bgrotate'];
