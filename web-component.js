@@ -1,5 +1,3 @@
-
-
 /*
   Credits:
 
@@ -18,6 +16,9 @@ SVGElement.prototype.getTransformToElement = SVGElement.prototype.getTransformTo
   return toElement.getScreenCTM().inverse().multiply(this.getScreenCTM());
 };
 
+const xmlns = "http://www.w3.org/2000/svg";
+const border = 10;
+
 function makeUid(bytes) {
   return [...Array(2 * bytes)].map(_ => Math.floor(Math.random() * 16).toString(16)).join('');
 }
@@ -35,7 +36,6 @@ class DragInfo {
     this.typ = typ;
     this.mouseStart = mouseStart;
     if (typ === dragTypes.CREATE) {
-      console.log('CREATE');
       return;
     }
 
@@ -43,6 +43,7 @@ class DragInfo {
     this.svg = group.ownerSVGElement;
     this.parent = group.parentNode;
     this.rect = group.getElementsByTagName('rect')[0];
+    this.id = this.group.getAttribute('id');
     this.resizer = group.getElementsByClassName('resizer')[0];
     this.rotator = group.getElementsByClassName('rotator')[0];
     switch (typ) {
@@ -75,7 +76,6 @@ class DragInfo {
   }
 }
 
-
 function createElement(qualifiedName, attributes, ...children) {
   const elem = document.createElement(qualifiedName);
   for (const [name, value] of Object.entries(attributes)) {
@@ -86,9 +86,6 @@ function createElement(qualifiedName, attributes, ...children) {
   }
   return elem;
 }
-
-const xmlns = "http://www.w3.org/2000/svg";
-const border = 10;
 
 function createSVGElement(qualifiedName, attributes, ...children) {
   const elem = document.createElementNS(xmlns, qualifiedName);
@@ -165,7 +162,7 @@ class RektEditor extends HTMLElement {
 
     svg g:hover > circle { opacity:0.3; }
     :host {
-      display: block;
+      display: inline-block;
     }
     :host([hidden]) { display: none }
     `;
@@ -396,7 +393,6 @@ class RektEditor extends HTMLElement {
   }
 
   attributeChangedCallback(name, oldValue, newValue) {
-    // console.log(`attribute changed: ${name}`);
     switch (name) {
       case 'bgimage':
         this._elems.backgroundImage.setAttribute('href', newValue);
@@ -483,7 +479,7 @@ class RektEditor extends HTMLElement {
     }
     const orderIndex = this._rectOrder.indexOf(id);
     if (orderIndex >= 0) {
-      this._rectOrder.splice(index, 1);
+      this._rectOrder.splice(orderIndex, 1);
       if (this._activeRect >= orderIndex && this._activeRect > 0) {
         this._activeRect--;
       }
@@ -602,10 +598,8 @@ class RektEditor extends HTMLElement {
     evt.preventDefault();
 
     if (this._dragInfo.typ === dragTypes.CREATE) {
-      console.log('DRAG_CREATE');
       this.createDraggedRect();
     }
-    // TODO(zellyn): insert rest of DragAction.drag contents here.
 
     const current = this.cursorPoint(evt);
     const pt = this._elems.svg.createSVGPoint();
@@ -617,25 +611,29 @@ class RektEditor extends HTMLElement {
     const offset = this.transformOffset(pt, frame);
 
     switch (di.typ) {
-    case dragTypes.MOVE:
-      this.moveRect(offset);
-      break
-    case dragTypes.RESIZE:
-      this.resizeRect(offset);
-      break;
-    case dragTypes.ROTATE:
-      this.rotateRect(offset);
-      break;
-    default:
-      throw `Unknown dragType: ${di.typ}`;
+      case dragTypes.MOVE:
+        this.moveRect(offset);
+        break
+      case dragTypes.RESIZE:
+        this.resizeRect(offset);
+        break;
+      case dragTypes.ROTATE:
+        this.rotateRect(offset);
+        break;
+      default:
+        throw `Unknown dragType: ${di.typ}`;
     }
   }
 
   moveRect(offset) {
     const di = this._dragInfo;
     const m = di.group.transform.baseVal[0].matrix;
-    m.e = di.elementStart.x + offset.x;
-    m.f = di.elementStart.y + offset.y;
+    const x = di.elementStart.x + offset.x;
+    const y = di.elementStart.y + offset.y;
+    m.e = x;
+    m.f = y;
+    this._rects[di.id].x = x;
+    this._rects[di.id].y = y;
   }
 
   resizeRect(offset) {
@@ -645,6 +643,8 @@ class RektEditor extends HTMLElement {
     di.rect.width.baseVal.value = w;
     di.rect.height.baseVal.value = h;
     this.updateHandles();
+    this._rects[di.id].width = w;
+    this._rects[di.id].height = h;
   }
 
   rotateRect(offset) {
@@ -652,16 +652,18 @@ class RektEditor extends HTMLElement {
     const newX = di.elementStart.x + offset.x;
     const newY = di.elementStart.y + offset.y;
     const coords = di.coords();
-    const deltaX = coords.x-newX;
-    const deltaY = coords.y-newY;
+    const deltaX = coords.x - newX;
+    const deltaY = coords.y - newY;
     var radians = Math.atan2(deltaY, deltaX) + Math.PI * 5 / 2;
     var degrees = (radians * 180 / Math.PI) % 360;
-    if (degrees>180) { degrees = degrees-360; }
+    if (degrees > 180) { degrees = degrees - 360; }
     const r = di.group.transform.baseVal[1];
     r.setRotate(degrees, 0, 0);
-    const h = Math.max(Math.sqrt(deltaX*deltaX + deltaY*deltaY), 1);
+    const h = Math.max(Math.sqrt(deltaX * deltaX + deltaY * deltaY), 1);
     di.rect.height.baseVal.value = h;
     this.updateHandles();
+    this._rects[di.id].rotate = degrees;
+    this._rects[di.id].height = h;
   }
 
   updateHandles() {
@@ -680,9 +682,10 @@ class RektEditor extends HTMLElement {
     di.parent = this._elems.rects;
     const coords = di.mouseStart.matrixTransform(this._elems.svg.getTransformToElement(di.parent));
     const uid = makeUid(16);
+    const id = 'rect-' + uid;
 
     const [group, rect, rotator, resizer] = this._addRect({
-      id: 'rect-' + uid,
+      id: id,
       x: coords.x,
       y: coords.y,
       width: 0,
@@ -694,10 +697,19 @@ class RektEditor extends HTMLElement {
     di.rect = rect;
     di.resizer = resizer;
     di.rotator = rotator;
+    di.id = id;
   }
 
   endDrag(evt) {
+    if (!this._dragInfo) return;
+    const typ = this._dragInfo.typ;
     this._dragInfo = null;
+    if (typ !== dragTypes.CREATE) {
+      const event = new CustomEvent('rectChange', {
+        detail: this.rectangles,
+      });
+      this.dispatchEvent(event);
+    }
   }
 
   // cursorPoint returns the svg-relative coordinates of a mouse click/touch.
