@@ -164,6 +164,13 @@ class RektEditor extends HTMLElement {
     :host {
       display: inline-block;
     }
+    svg g.active rect.dragg {
+      opacity: 1;
+      fill-opacity: 0.3;
+      stroke: #060;
+      stroke-width: 0.1em;
+      stroke-opacity: 0.5;
+    }
     :host([hidden]) { display: none }
     `;
 
@@ -231,7 +238,10 @@ class RektEditor extends HTMLElement {
     shadow.appendChild(style);
     shadow.appendChild(span);
     shadow.appendChild(svg);
+    this.clearState();
+  }
 
+  clearState() {
     // A map from rect id to rect object.
     this._rects = {};
     // A list of rect ids.
@@ -241,6 +251,9 @@ class RektEditor extends HTMLElement {
 
     // The currently active drag event.
     this._dragInfo = null;
+
+    // Default rotation.
+    this._defaultRotate = 0;
   }
 
   connectedCallback() {
@@ -304,6 +317,7 @@ class RektEditor extends HTMLElement {
     svgremoveEventListener('mousemove', this._handlers.drag);
     svgremoveEventListener('mouseup', e => this._handlers.endDrag);
     svgremoveEventListener('mouseleave', e => this._handlers.endDrag);
+    this.clearState();
   }
 
   static get observedAttributes() {
@@ -376,6 +390,7 @@ class RektEditor extends HTMLElement {
 
   _setRotate() {
     const rot = this.getAttribute('bgrotate') || 0;
+    this._defaultRotate = +rot;
     const x = this.getAttribute('bgx');
     const y = this.getAttribute('bgy');
     this._elems.backgroundPattern.setAttribute('patternTransform', `rotate(${rot},${x},${y})`);
@@ -447,7 +462,10 @@ class RektEditor extends HTMLElement {
       }
     }
 
+    let activeId = "none";
+
     newValue.forEach(rect => {
+      if (rect.active) activeId = rect.id;
       const oldRect = this._rects[rect.id];
       if (!oldRect) {
         this._addRect(rect);
@@ -455,6 +473,7 @@ class RektEditor extends HTMLElement {
         this._updateRect(rect);
       }
     });
+    this._setActive(activeId);
   }
 
   _invalidRects(rects) {
@@ -494,11 +513,29 @@ class RektEditor extends HTMLElement {
     this._updateActiveRect();
   }
 
+  _setActive(id) {
+    this._activeRect = this._rectOrder.indexOf(id);
+    this._updateActiveRect();
+  }
+
   _updateActiveRect() {
     if (this._activeRect < 0 || this._activeRect > this._rectOrder.length) {
       this._activeRect = 0;
     }
-    // TODO(zellyn): update classes/order
+    this._rectOrder.forEach((id, index) => {
+      if (index === this._activeRect) {
+        this._rects[id].active = true;
+        this._defaultRotate = this._rects[id].rotate;
+        const group = this.shadowRoot.getElementById(id);
+        group.classList.add('active');
+        if (group.nextElementSibling) {
+          this._elems.rects.appendChild(group);
+        }
+      } else {
+        this._rects[id].active = false;
+        this.shadowRoot.getElementById(id).classList.remove('active');
+      }
+    })
   }
 
   _updateRect(rect) {
@@ -543,7 +580,7 @@ class RektEditor extends HTMLElement {
     const circle1 = createSVGElement('circle',
       {
         class: 'dragg rotator',
-        r: 3,
+        r: '0.5em',
         cx: 0,
         cy: rect.height,
       }
@@ -551,7 +588,7 @@ class RektEditor extends HTMLElement {
     const circle2 = createSVGElement('circle',
       {
         class: 'dragg resizer',
-        r: 3,
+        r: '0.5em',
         cx: rect.width,
         cy: rect.height,
       }
@@ -690,7 +727,7 @@ class RektEditor extends HTMLElement {
       y: coords.y,
       width: 0,
       height: 0,
-      rotate: 0, // TODO(zellyn): use default rotation.
+      rotate: this._defaultRotate,
     });
 
     di.group = group;
@@ -698,6 +735,7 @@ class RektEditor extends HTMLElement {
     di.resizer = resizer;
     di.rotator = rotator;
     di.id = id;
+    this._setActive(id);
   }
 
   endDrag(evt) {
@@ -732,10 +770,7 @@ class RektEditor extends HTMLElement {
       return;
     }
 
-    if (this._dragInfo.group.nextElementSibling) {
-      this._dragInfo.parent.appendChild(this._dragInfo.group);
-      // TODO(zellyn): set this._activeRect
-    }
+    this._setActive(this._dragInfo.id);
   }
 }
 
